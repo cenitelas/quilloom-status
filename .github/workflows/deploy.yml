@@ -1,0 +1,33 @@
+name: Deploy Status
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package artifact
+        run: tar -czf status.tar.gz public
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Upload artifact
+        run: |
+          scp -i ~/.ssh/id_ed25519 status.tar.gz \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/opt/quilloom/releases/status-latest.tar.gz
+
+      - name: Run deploy script
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+            '/opt/quilloom/bin/deploy-status.sh'
