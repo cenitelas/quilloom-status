@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en" class="h-full antialiased">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quilloom Status</title>
+  <meta name="description" content="Real-time status of Quilloom services" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Geist', 'system-ui', 'sans-serif'],
+            mono: ['Geist Mono', 'ui-monospace', 'monospace'],
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { font-family: 'Geist', system-ui, sans-serif; }
+    .bar { transition: background-color .15s ease; }
+  </style>
+</head>
+<body class="min-h-full flex flex-col bg-zinc-950 text-zinc-100">
+  <header class="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
+    <a href="https://quilloom.com" class="flex items-center gap-2 font-semibold tracking-tight">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="text-white" aria-hidden="true">
+        <path d="M20 4c-8 1-13 6-14 14l4-1" />
+        <path d="M20 4 6 18" />
+        <path d="M6 18H3" />
+        <path d="M14 6l-4 4M18 8l-6 6" />
+      </svg>
+      Quilloom
+    </a>
+    <nav class="flex items-center gap-4 text-sm">
+      <a href="https://quilloom.com" class="hover:text-white text-zinc-300">Home</a>
+      <a href="https://code.quilloom.com" class="hover:text-white text-zinc-300">Docs</a>
+    </nav>
+  </header>
+
+  <main class="flex-1">
+    <div class="max-w-4xl mx-auto px-6 py-12">
+      <div class="mb-8">
+        <h1 class="text-3xl font-semibold tracking-tight">System Status</h1>
+        <p class="text-zinc-400 text-sm mt-1">Real-time status of Quilloom services. Last updated <span id="updated" class="tabular-nums">—</span>.</p>
+      </div>
+
+      <div id="overall" class="rounded-lg border border-zinc-800 bg-zinc-900/40 px-5 py-4 mb-6 flex items-center gap-3">
+        <span id="overall-dot" class="w-2.5 h-2.5 rounded-full bg-zinc-600"></span>
+        <span id="overall-text" class="font-medium">Loading…</span>
+      </div>
+
+      <div id="active-incidents" class="space-y-3 mb-8"></div>
+
+      <section class="mb-10">
+        <h2 class="text-xs uppercase tracking-wider text-zinc-500 mb-3">Components</h2>
+        <div id="components" class="rounded-lg border border-zinc-800 bg-zinc-900/40 divide-y divide-zinc-800"></div>
+      </section>
+
+      <section>
+        <h2 class="text-xs uppercase tracking-wider text-zinc-500 mb-3">Past Incidents</h2>
+        <div id="past-incidents" class="space-y-4 text-sm"></div>
+      </section>
+
+      <footer class="mt-16 pt-6 border-t border-zinc-800 text-xs text-zinc-500 flex items-center justify-between">
+        <span>Powered by Gatus · Status page by Quilloom</span>
+        <a href="https://quilloom.com" class="hover:text-zinc-300">quilloom.com</a>
+      </footer>
+    </div>
+  </main>
+
+  <script>
+    const DAYS = 90
+
+    const statusStyles = {
+      operational:   { dot: 'bg-emerald-500', text: 'All systems operational',      label: 'Operational',       bar: 'bg-emerald-500' },
+      degraded:      { dot: 'bg-amber-500',   text: 'Degraded performance',          label: 'Degraded',          bar: 'bg-amber-500'   },
+      partial:       { dot: 'bg-amber-500',   text: 'Partial outage',                label: 'Partial outage',    bar: 'bg-amber-500'   },
+      major:         { dot: 'bg-rose-500',    text: 'Major outage',                  label: 'Major outage',      bar: 'bg-rose-500'    },
+      maintenance:   { dot: 'bg-sky-500',     text: 'Under maintenance',             label: 'Maintenance',       bar: 'bg-sky-500'     },
+      unknown:       { dot: 'bg-zinc-600',    text: 'Status unknown',                label: 'Unknown',           bar: 'bg-zinc-700'    },
+    }
+
+    const incidentBannerStyles = {
+      investigating: { bg: 'bg-rose-950/40 border-rose-900',    tag: 'bg-rose-500',   label: 'Investigating' },
+      identified:    { bg: 'bg-amber-950/40 border-amber-900',  tag: 'bg-amber-500',  label: 'Identified'    },
+      monitoring:    { bg: 'bg-sky-950/40 border-sky-900',      tag: 'bg-sky-500',    label: 'Monitoring'    },
+      resolved:      { bg: 'bg-zinc-900/40 border-zinc-800',    tag: 'bg-emerald-500',label: 'Resolved'      },
+      maintenance:   { bg: 'bg-sky-950/40 border-sky-900',      tag: 'bg-sky-500',    label: 'Maintenance'   },
+    }
+
+    function fmtDate(ts) {
+      const d = new Date(ts)
+      return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    }
+
+    function fmtShortDate(ts) {
+      const d = new Date(ts)
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    }
+
+    function bucketByDay(results) {
+      const buckets = new Map()
+      for (const r of results) {
+        const key = new Date(r.timestamp).toISOString().slice(0, 10)
+        const prev = buckets.get(key)
+        const success = !!r.success
+        if (!prev) buckets.set(key, { total: 1, failed: success ? 0 : 1 })
+        else { prev.total++; if (!success) prev.failed++ }
+      }
+      return buckets
+    }
+
+    function dayStatus(bucket) {
+      if (!bucket) return 'missing'
+      if (bucket.failed === 0) return 'ok'
+      if (bucket.failed >= bucket.total) return 'down'
+      return 'partial'
+    }
+
+    function dayColor(s) {
+      switch (s) {
+        case 'ok':      return 'bg-emerald-500'
+        case 'partial': return 'bg-amber-500'
+        case 'down':    return 'bg-rose-500'
+        default:        return 'bg-zinc-800'
+      }
+    }
+
+    function computeUptime(endpoint) {
+      const results = endpoint.results || []
+      if (!results.length) return null
+      const ok = results.filter(r => r.success).length
+      return (ok / results.length) * 100
+    }
+
+    function endpointStatus(endpoint) {
+      const results = endpoint.results || []
+      if (!results.length) return 'unknown'
+      const last = results[results.length - 1]
+      if (!last.success) {
+        const recent = results.slice(-5)
+        const fails = recent.filter(r => !r.success).length
+        if (fails >= 3) return 'major'
+        return 'partial'
+      }
+      return 'operational'
+    }
+
+    function worstStatus(statuses) {
+      const order = ['major', 'partial', 'degraded', 'maintenance', 'unknown', 'operational']
+      for (const s of order) if (statuses.includes(s)) return s
+      return 'operational'
+    }
+
+    function renderDayBars(results) {
+      const buckets = bucketByDay(results)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const parts = []
+      for (let i = DAYS - 1; i >= 0; i--) {
+        const d = new Date(today)
+        d.setDate(today.getDate() - i)
+        const key = d.toISOString().slice(0, 10)
+        const b = buckets.get(key)
+        const s = dayStatus(b)
+        const tip = b
+          ? `${fmtShortDate(d)} · ${b.total - b.failed}/${b.total} checks ok`
+          : `${fmtShortDate(d)} · no data`
+        parts.push(`<div class="bar flex-1 h-8 rounded-sm ${dayColor(s)} hover:opacity-80" title="${tip}"></div>`)
+      }
+      return `<div class="flex gap-[2px] mt-2">${parts.join('')}</div>`
+    }
+
+    function renderComponent(ep) {
+      const status = endpointStatus(ep)
+      const style = statusStyles[status] || statusStyles.unknown
+      const uptime = computeUptime(ep)
+      const uptimeStr = uptime === null ? '—' : uptime.toFixed(2) + '%'
+      return `
+        <div class="px-5 py-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="w-2.5 h-2.5 rounded-full ${style.dot}"></span>
+              <div>
+                <div class="font-medium">${escapeHtml(ep.name)}</div>
+                <div class="text-xs text-zinc-500">${escapeHtml(ep.group || '')}</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-sm">${style.label}</div>
+              <div class="text-xs text-zinc-500 tabular-nums">${uptimeStr} uptime</div>
+            </div>
+          </div>
+          ${renderDayBars(ep.results || [])}
+          <div class="flex justify-between mt-1 text-[10px] text-zinc-600 tabular-nums">
+            <span>${DAYS} days ago</span>
+            <span>Today</span>
+          </div>
+        </div>
+      `
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+    }
+
+    function renderIncident(inc, active) {
+      const s = incidentBannerStyles[inc.status] || incidentBannerStyles.investigating
+      const updates = (inc.updates || []).slice().sort((a, b) => new Date(b.at) - new Date(a.at))
+      const updatesHtml = updates.map(u => {
+        const us = incidentBannerStyles[u.status] || s
+        return `
+          <div class="pt-2">
+            <div class="flex items-center gap-2 text-xs">
+              <span class="inline-block w-2 h-2 rounded-full ${us.tag}"></span>
+              <span class="font-medium text-zinc-200">${escapeHtml(us.label)}</span>
+              <span class="text-zinc-500 tabular-nums">${fmtDate(u.at)}</span>
+            </div>
+            <p class="text-sm text-zinc-300 mt-1 ml-4">${escapeHtml(u.body)}</p>
+          </div>
+        `
+      }).join('')
+      return `
+        <article class="rounded-lg border ${s.bg} px-5 py-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="inline-block text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full ${s.tag} text-zinc-950 font-semibold">${escapeHtml(s.label)}</span>
+              <h3 class="font-medium">${escapeHtml(inc.title)}</h3>
+            </div>
+            <span class="text-xs text-zinc-500 tabular-nums">${fmtDate(inc.started_at)}</span>
+          </div>
+          ${inc.body ? `<p class="text-sm text-zinc-300 mt-2">${escapeHtml(inc.body)}</p>` : ''}
+          ${updatesHtml ? `<div class="mt-3 border-t border-zinc-800/70 divide-y divide-zinc-800/70">${updatesHtml}</div>` : ''}
+        </article>
+      `
+    }
+
+    async function fetchJSON(url) {
+      const res = await fetch(url, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`${url} → ${res.status}`)
+      return res.json()
+    }
+
+    async function load() {
+      const [endpoints, incidents] = await Promise.all([
+        fetchJSON('/api/v1/endpoints/statuses').catch(() => []),
+        fetchJSON('/incidents.json').catch(() => ({ incidents: [] })),
+      ])
+
+      const list = Array.isArray(endpoints) ? endpoints : []
+      const byGroup = new Map()
+      for (const ep of list) {
+        const g = ep.group || 'Services'
+        if (!byGroup.has(g)) byGroup.set(g, [])
+        byGroup.get(g).push(ep)
+      }
+
+      const statuses = list.map(endpointStatus)
+      const activeIncidents = (incidents.incidents || []).filter(i => i.status !== 'resolved')
+      const pastIncidents = (incidents.incidents || []).filter(i => i.status === 'resolved')
+        .sort((a, b) => new Date(b.started_at) - new Date(a.started_at))
+
+      let overall = worstStatus(statuses)
+      if (activeIncidents.some(i => i.severity === 'major')) overall = 'major'
+      else if (activeIncidents.length && overall === 'operational') overall = 'partial'
+
+      const overallStyle = statusStyles[overall] || statusStyles.unknown
+      document.getElementById('overall-dot').className = `w-2.5 h-2.5 rounded-full ${overallStyle.dot}`
+      document.getElementById('overall-text').textContent = overallStyle.text
+      document.getElementById('updated').textContent = fmtDate(new Date())
+
+      const active = document.getElementById('active-incidents')
+      active.innerHTML = activeIncidents.map(i => renderIncident(i, true)).join('')
+
+      const compEl = document.getElementById('components')
+      if (!list.length) {
+        compEl.innerHTML = `<div class="px-5 py-4 text-sm text-zinc-500">Monitor offline — no component data.</div>`
+      } else {
+        const groupBlocks = []
+        for (const [group, eps] of byGroup) {
+          groupBlocks.push(`<div class="px-5 py-2 text-xs uppercase tracking-wider text-zinc-500 bg-zinc-900/60">${escapeHtml(group)}</div>`)
+          groupBlocks.push(eps.map(renderComponent).join(''))
+        }
+        compEl.innerHTML = groupBlocks.join('')
+      }
+
+      const past = document.getElementById('past-incidents')
+      if (!pastIncidents.length) {
+        past.innerHTML = `<p class="text-zinc-500">No incidents reported in the last 90 days.</p>`
+      } else {
+        past.innerHTML = pastIncidents.map(i => renderIncident(i, false)).join('')
+      }
+    }
+
+    load()
+    setInterval(load, 60_000)
+  </script>
+</body>
+</html>
