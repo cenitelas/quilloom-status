@@ -105,10 +105,17 @@
       return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     }
 
+    function localDateKey(d) {
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
+
     function bucketByDay(results) {
       const buckets = new Map()
       for (const r of results) {
-        const key = new Date(r.timestamp).toISOString().slice(0, 10)
+        const key = localDateKey(new Date(r.timestamp))
         const prev = buckets.get(key)
         const success = !!r.success
         if (!prev) buckets.set(key, { total: 1, failed: success ? 0 : 1 })
@@ -167,7 +174,7 @@
       for (let i = DAYS - 1; i >= 0; i--) {
         const d = new Date(today)
         d.setDate(today.getDate() - i)
-        const key = d.toISOString().slice(0, 10)
+        const key = localDateKey(d)
         const b = buckets.get(key)
         const s = dayStatus(b)
         const tip = b
