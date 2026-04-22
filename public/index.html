@@ -140,13 +140,6 @@
       }
     }
 
-    function computeUptime(endpoint) {
-      const results = endpoint.results || []
-      if (!results.length) return null
-      const ok = results.filter(r => r.success).length
-      return (ok / results.length) * 100
-    }
-
     function endpointStatus(endpoint) {
       const results = endpoint.results || []
       if (!results.length) return 'unknown'
@@ -185,31 +178,43 @@
       return `<div class="flex gap-[2px] mt-2">${parts.join('')}</div>`
     }
 
+    const UPTIME_WINDOWS = ['1h', '24h', '7d', '30d']
+
+    function fmtUptime(v) {
+      if (v === null || v === undefined || Number.isNaN(v)) return '—'
+      return (v * 100).toFixed(2) + '%'
+    }
+
+    function renderUptimePills(uptimes) {
+      return UPTIME_WINDOWS.map(w => `
+        <div class="flex flex-col items-start gap-0.5 px-3 py-1.5 rounded-md bg-zinc-900/60 border border-zinc-800">
+          <span class="text-[10px] uppercase tracking-wider text-zinc-500">${w}</span>
+          <span class="text-xs tabular-nums">${fmtUptime(uptimes?.[w])}</span>
+        </div>
+      `).join('')
+    }
+
     function renderComponent(ep) {
       const status = endpointStatus(ep)
       const style = statusStyles[status] || statusStyles.unknown
-      const uptime = computeUptime(ep)
-      const uptimeStr = uptime === null ? '—' : uptime.toFixed(2) + '%'
       return `
         <div class="px-5 py-4">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <span class="w-2.5 h-2.5 rounded-full ${style.dot}"></span>
-              <div>
-                <div class="font-medium">${escapeHtml(ep.name)}</div>
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3 min-w-0">
+              <span class="w-2.5 h-2.5 rounded-full ${style.dot} shrink-0"></span>
+              <div class="min-w-0">
+                <div class="font-medium truncate">${escapeHtml(ep.name)}</div>
                 <div class="text-xs text-zinc-500">${escapeHtml(ep.group || '')}</div>
               </div>
             </div>
-            <div class="text-right">
-              <div class="text-sm">${style.label}</div>
-              <div class="text-xs text-zinc-500 tabular-nums">${uptimeStr} uptime</div>
-            </div>
+            <div class="text-sm shrink-0">${style.label}</div>
           </div>
           ${renderDayBars(ep.results || [])}
           <div class="flex justify-between mt-1 text-[10px] text-zinc-600 tabular-nums">
             <span>${DAYS} days ago</span>
             <span>Today</span>
           </div>
+          <div class="flex flex-wrap gap-2 mt-3">${renderUptimePills(ep.uptimes)}</div>
         </div>
       `
     }
@@ -255,13 +260,22 @@
       return res.json()
     }
 
+    async function fetchUptimes(key) {
+      const entries = await Promise.all(UPTIME_WINDOWS.map(async w => {
+        const v = await fetchJSON(`/api/v1/endpoints/${key}/uptimes/${w}`).catch(() => null)
+        return [w, typeof v === 'number' ? v : null]
+      }))
+      return Object.fromEntries(entries)
+    }
+
     async function load() {
       const [endpoints, incidents] = await Promise.all([
-        fetchJSON('/api/v1/endpoints/statuses').catch(() => []),
+        fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=200').catch(() => []),
         fetchJSON('/incidents.json').catch(() => ({ incidents: [] })),
       ])
 
       const list = Array.isArray(endpoints) ? endpoints : []
+      await Promise.all(list.map(async ep => { ep.uptimes = await fetchUptimes(ep.key) }))
       const byGroup = new Map()
       for (const ep of list) {
         const g = ep.group || 'Services'
