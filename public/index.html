@@ -270,7 +270,7 @@
 
     async function load() {
       const [endpoints, incidents] = await Promise.all([
-        fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=200').catch(() => []),
+        fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=5000').catch(() => []),
         fetchJSON('/incidents.json').catch(() => ({ incidents: [] })),
       ])
 
