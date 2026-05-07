@@ -268,14 +268,7 @@
       return Object.fromEntries(entries)
     }
 
-    async function load() {
-      const [endpoints, incidents] = await Promise.all([
-        fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=131000').catch(() => []),
-        fetchJSON('/incidents.json').catch(() => ({ incidents: [] })),
-      ])
-
-      const list = Array.isArray(endpoints) ? endpoints : []
-      await Promise.all(list.map(async ep => { ep.uptimes = await fetchUptimes(ep.key) }))
+    function render(list, incidents) {
       const byGroup = new Map()
       for (const ep of list) {
         const g = ep.group || 'Services'
@@ -285,8 +278,6 @@
 
       const statuses = list.map(endpointStatus)
       const activeIncidents = (incidents.incidents || []).filter(i => i.status !== 'resolved')
-      const pastIncidents = (incidents.incidents || []).filter(i => i.status === 'resolved')
-        .sort((a, b) => new Date(b.started_at) - new Date(a.started_at))
 
       let overall = worstStatus(statuses)
       if (activeIncidents.some(i => i.severity === 'major')) overall = 'major'
@@ -311,17 +302,48 @@
         }
         compEl.innerHTML = groupBlocks.join('')
       }
+    }
 
+    const historyByKey = new Map()
+
+    function mergeResults(history, recent) {
+      if (!history?.length) return recent || []
+      if (!recent?.length) return history
+      const lastTs = history[history.length - 1].timestamp
+      const tail = recent.filter(r => r.timestamp > lastTs)
+      return tail.length ? history.concat(tail) : history
+    }
+
+    async function load() {
+      const [quickEndpoints, incidents] = await Promise.all([
+        fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=200').catch(() => []),
+        fetchJSON('/incidents.json').catch(() => ({ incidents: [] })),
+      ])
+
+      const list = Array.isArray(quickEndpoints) ? quickEndpoints : []
+      await Promise.all(list.map(async ep => { ep.uptimes = await fetchUptimes(ep.key) }))
+      for (const ep of list) ep.results = mergeResults(historyByKey.get(ep.key), ep.results)
+      render(list, incidents)
+
+      const pastIncidents = (incidents.incidents || []).filter(i => i.status === 'resolved')
+        .sort((a, b) => new Date(b.started_at) - new Date(a.started_at))
       const past = document.getElementById('past-incidents')
-      if (!pastIncidents.length) {
-        past.innerHTML = `<p class="text-zinc-500">No incidents reported in the last 90 days.</p>`
-      } else {
-        past.innerHTML = pastIncidents.map(i => renderIncident(i, false)).join('')
-      }
+      past.innerHTML = pastIncidents.length
+        ? pastIncidents.map(i => renderIncident(i, false)).join('')
+        : `<p class="text-zinc-500">No incidents reported in the last 90 days.</p>`
+    }
+
+    async function loadHistory() {
+      const full = await fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=131000').catch(() => null)
+      if (!Array.isArray(full) || !full.length) return
+      for (const ep of full) historyByKey.set(ep.key, ep.results || [])
+      load()
     }
 
     load()
+    loadHistory()
     setInterval(load, 60_000)
+    setInterval(loadHistory, 3600_000)
   </script>
 </body>
 </html>
