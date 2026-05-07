@@ -1,0 +1,11 @@
+[Unit]
+Description=Run gatus-aggregate every minute
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=gatus-aggregate.service
+
+[Install]
+WantedBy=timers.target

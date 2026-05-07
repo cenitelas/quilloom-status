@@ -112,16 +112,31 @@
       return `${y}-${m}-${day}`
     }
 
-    function bucketByDay(results) {
+    function bucketHoursByDay(hours) {
       const buckets = new Map()
-      for (const r of results) {
-        const key = localDateKey(new Date(r.timestamp))
+      for (const [iso, total, failed] of hours) {
+        const key = localDateKey(new Date(iso))
         const prev = buckets.get(key)
-        const success = !!r.success
-        if (!prev) buckets.set(key, { total: 1, failed: success ? 0 : 1 })
-        else { prev.total++; if (!success) prev.failed++ }
+        if (!prev) buckets.set(key, { total, failed })
+        else { prev.total += total; prev.failed += failed }
       }
       return buckets
+    }
+
+    const UPTIME_WINDOW_MS = {
+      '1h': 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
+    }
+
+    function computeUptime(hours, windowMs) {
+      const cutoff = Date.now() - windowMs
+      let total = 0, failed = 0
+      for (const [iso, t, f] of hours || []) {
+        if (new Date(iso).getTime() >= cutoff) { total += t; failed += f }
+      }
+      return total === 0 ? null : (total - failed) / total
     }
 
     function dayStatus(bucket) {
@@ -141,13 +156,11 @@
     }
 
     function endpointStatus(endpoint) {
-      const results = endpoint.results || []
-      if (!results.length) return 'unknown'
-      const last = results[results.length - 1]
-      if (!last.success) {
-        const recent = results.slice(-5)
-        const fails = recent.filter(r => !r.success).length
-        if (fails >= 3) return 'major'
+      const latest = endpoint.latest
+      if (!latest) return 'unknown'
+      if (!latest.success) {
+        const lastHr = endpoint.hours?.[endpoint.hours.length - 1]
+        if (lastHr && lastHr[1] > 0 && lastHr[2] / lastHr[1] >= 0.6) return 'major'
         return 'partial'
       }
       return 'operational'
@@ -159,8 +172,8 @@
       return 'operational'
     }
 
-    function renderDayBars(results) {
-      const buckets = bucketByDay(results)
+    function renderDayBars(hours) {
+      const buckets = bucketHoursByDay(hours || [])
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       const parts = []
@@ -178,7 +191,7 @@
       return `<div class="flex gap-[2px] mt-2">${parts.join('')}</div>`
     }
 
-    const UPTIME_WINDOWS = ['1h', '24h', '7d', '30d']
+    const UPTIME_WINDOWS = Object.keys(UPTIME_WINDOW_MS)
 
     function fmtUptime(v) {
       if (v === null || v === undefined || Number.isNaN(v)) return '—'
@@ -209,7 +222,7 @@
             </div>
             <div class="text-sm shrink-0">${style.label}</div>
           </div>
-          ${renderDayBars(ep.results || [])}
+          ${renderDayBars(ep.hours)}
           <div class="flex justify-between mt-1 text-[10px] text-zinc-600 tabular-nums">
             <span>${DAYS} days ago</span>
             <span>Today</span>
@@ -260,14 +273,6 @@
       return res.json()
     }
 
-    async function fetchUptimes(key) {
-      const entries = await Promise.all(UPTIME_WINDOWS.map(async w => {
-        const v = await fetchJSON(`/api/v1/endpoints/${key}/uptimes/${w}`).catch(() => null)
-        return [w, typeof v === 'number' ? v : null]
-      }))
-      return Object.fromEntries(entries)
-    }
-
     function render(list, incidents) {
       const byGroup = new Map()
       for (const ep of list) {
@@ -304,25 +309,19 @@
       }
     }
 
-    const historyByKey = new Map()
-
-    function mergeResults(history, recent) {
-      if (!history?.length) return recent || []
-      if (!recent?.length) return history
-      const lastTs = history[history.length - 1].timestamp
-      const tail = recent.filter(r => r.timestamp > lastTs)
-      return tail.length ? history.concat(tail) : history
-    }
-
     async function load() {
-      const [quickEndpoints, incidents] = await Promise.all([
-        fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=200').catch(() => []),
+      const [history, incidents] = await Promise.all([
+        fetchJSON('/history.json').catch(() => ({ endpoints: [] })),
         fetchJSON('/incidents.json').catch(() => ({ incidents: [] })),
       ])
 
-      const list = Array.isArray(quickEndpoints) ? quickEndpoints : []
-      await Promise.all(list.map(async ep => { ep.uptimes = await fetchUptimes(ep.key) }))
-      for (const ep of list) ep.results = mergeResults(historyByKey.get(ep.key), ep.results)
+      const list = (history.endpoints || []).map(ep => ({
+        ...ep,
+        uptimes: Object.fromEntries(
+          UPTIME_WINDOWS.map(w => [w, computeUptime(ep.hours, UPTIME_WINDOW_MS[w])])
+        ),
+      }))
+
       render(list, incidents)
 
       const pastIncidents = (incidents.incidents || []).filter(i => i.status === 'resolved')
@@ -333,17 +332,8 @@
         : `<p class="text-zinc-500">No incidents reported in the last 90 days.</p>`
     }
 
-    async function loadHistory() {
-      const full = await fetchJSON('/api/v1/endpoints/statuses?page=1&pageSize=131000').catch(() => null)
-      if (!Array.isArray(full) || !full.length) return
-      for (const ep of full) historyByKey.set(ep.key, ep.results || [])
-      load()
-    }
-
     load()
-    loadHistory()
     setInterval(load, 60_000)
-    setInterval(loadHistory, 3600_000)
   </script>
 </body>
 </html>
